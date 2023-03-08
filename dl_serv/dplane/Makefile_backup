@@ -1,0 +1,114 @@
+# TODO: Make this Makefile.in pretty
+
+TARGETS = libdplane.a 
+OBJS = dplane.o
+CC=g++ -g -O3  -std=c++17 
+DPDK=1
+PS=0
+NETMAP=0
+ONVM=0
+CCP=
+CFLAGS=-DMAX_CPUS=48 -DTENSORFLOW_C_TF_TSTRING_H_
+
+# Add arch-specific optimization
+ifeq ($(shell uname -m),x86_64)
+LIBS += -m64
+endif
+
+# mtcp library and header 
+MTCP_FLD    = /home/qi/dplane/mtcp
+MTCP_INC    =-I${MTCP_FLD}/include -I${MTCP_FLD}/src/include
+MTCP_LIB    =-L${MTCP_FLD}/lib
+MTCP_TARGET = ${MTCP_LIB}/libmtcp.a
+
+
+UTIL_FLD = /home/qi/dplane/util
+UTIL_INC = -I${UTIL_FLD}/include
+UTIL_OBJ = ${UTIL_FLD}/http_parsing.o ${UTIL_FLD}/tdate_parse.o ${UTIL_FLD}/netlib.o
+
+# util library and header
+INC = -I./include/ ${UTIL_INC} ${MTCP_INC} -I${UTIL_FLD}/include -I/home/qi/dplane/apps/resnet/dplane/include -I/home/qi/cppflow_another/include -I/home/qi/libtf_gpu_2.5/include
+LIBS = ${MTCP_LIB}  -L/home/qi/libtf_gpu_2.5/lib
+
+# psio-specific variables
+ifeq ($(PS),1)
+PS_DIR = ../../io_engine/
+PS_INC = ${PS_DIR}/include
+INC += -I{PS_INC}
+LIBS += -lmtcp -L${PS_DIR}/lib -lps -lpthread -lnuma -lrt
+endif
+
+# netmap-specific variables
+ifeq ($(NETMAP),1)
+LIBS += -lmtcp -lpthread -lnuma -lrt
+endif
+
+# dpdk-specific variables
+ifeq ($(DPDK),1)
+DPDK_LIBS = -L$(RTE_SDK)/$(RTE_TARGET)/lib
+DPDK_LIBS += -Wl,-whole-archive -lrte_pmd_ixgbe -Wl,-no-whole-archive
+DPDK_LIBS += -Wl,-whole-archive -lrte_mempool_ring -Wl,-no-whole-archive
+DPDK_LIBS += -ldpdk
+DPDK_LIBS += -lrte_eal
+DPDK_LIBS += -lrte_ethdev
+DPDK_LIBS += -lrte_hash
+DPDK_LIBS += -lrte_mbuf
+DPDK_LIBS += -lrte_mempool
+DPDK_LIBS += -lrte_mempool_stack
+DPDK_LIBS += -lrte_ring
+
+#TF_LIBS += -ltensorflow -ltensorflow_framework 
+TF_LIBS += -ltensorflow 
+
+
+#DPDK_MACHINE_LINKER_FLAGS=$${RTE_SDK}/$${RTE_TARGET}/lib/ldflags.txt
+#DPDK_MACHINE_LDFLAGS=$(shell cat ${DPDK_MACHINE_LINKER_FLAGS})
+#$(info link_flag=$(DPDK_MACHINE_LDFLAGS))
+LIBS += -g -O3 -pthread -lrt -march=native ${MTCP_FLD}/lib/libmtcp.a $(DPDK_LIBS) $(TF_LIBS) -lnuma -lmtcp -lpthread -lrt -ldl -lgmp  -lm#-L${RTE_SDK}/${RTE_TARGET}/lib ${DPDK_MACHINE_LDFLAGS}
+endif
+
+# onvm-specific variables
+ifeq ($(ONVM),1)
+ifeq ($(RTE_TARGET),)
+$(error "Please define RTE_TARGET environment variable")
+endif
+
+INC += -I/onvm_nflib
+INC += -I/lib
+INC += -DENABLE_ONVM
+LIBS += /onvm_nflib/$(RTE_TARGET)/libonvm.a
+LIBS += /lib/$(RTE_TARGET)/lib/libonvmhelper.a -lm
+endif
+
+ifeq ($V,) # no echo
+	export MSG=@echo
+	export HIDE=@
+else
+	export MSG=@\#
+	export HIDE=
+endif
+
+ifeq ($(CCP), 1)
+# LIBCCP
+LIBCCP = $(MTCP_FLD)/src/libccp
+LIBS += -L$(LIBCCP) -lccp -lstartccp
+INC += -I$(LIBCCP)
+endif
+
+all: $(TARGETS) 
+
+dplane.o: dplane.cpp
+	$(MSG) "   CC $<"
+	$(HIDE) ${CC} -c $< -o $@ ${CFLAGS} ${INC} 
+	#${MTCP_FLD}/lib/libmtcp.a
+
+$(TARGETS): $(OBJS) 
+	rm -f $@
+	ar cr $@ $(OBJS) 
+
+clean:
+	$(MSG) "   CLEAN $(TARGETS)"
+	$(HIDE) rm -f *~ *.o ${TARGETS} log_* *.so *.a
+
+distclean: clean
+	rm -rf Makefile
